@@ -2,7 +2,7 @@
 
 > **Lightweight, High-Performance Windows Desktop Calendar made to create a suit with KerkenezMail**  
 > *Target Framework:* **.NET 10** (`net10.0-windows10.0.19041.0`)  
-> *Author:* Ahmet İsmail Eraslan & DeepMind / Antigravity Engineering  
+> *Author:* Kerkenez Development & DeepMind / Antigravity Engineering  
 
 ---
 

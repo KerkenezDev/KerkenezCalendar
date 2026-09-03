@@ -75,11 +75,11 @@ namespace KerkenezCalendar.Services
             }
             catch { }
 
-            // 5. Check known publish or ProgramFiles folders
+            // 5. Check known standard installation folders
             string[] knownPaths = new[]
             {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Programs", "ProgramFiles", "KerkenezCalendar", "publish", "KerkenezCalendar.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Programs", "ProgramFiles", "KerkenezCalendar-dev", "publish", "KerkenezCalendar.exe")
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "KerkenezCalendar", "KerkenezCalendar.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "KerkenezCalendar", "KerkenezCalendar.exe")
             };
             foreach (var kp in knownPaths)
             {

@@ -10,7 +10,7 @@ namespace KerkenezCalendar.Services
         private const string UninstallKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\KerkenezCalendar";
         private const string DisplayName = "Kerkenez Calendar";
         private const string DisplayVersion = "1.0.0";
-        private const string Publisher = "ismlEraslan";
+        private const string Publisher = "KerkenezDev";
         private const string UrlInfoAbout = "https://github.com/KerkenezDev/KerkenezCalendar";
         private const string HelpLink = "https://github.com/KerkenezDev/KerkenezCalendar";
 
