@@ -1,4 +1,4 @@
-# 🦅 Kerkenez Calendar (Win32)
+#  Kerkenez Calendar (Win32)
 
 > **Lightweight, High-Performance Windows Desktop Calendar in the Philosophy of Kerkenez Mail (Email Summarizer)**  
 > *Target Framework:* **.NET 10** (`net10.0-windows10.0.19041.0`)  
