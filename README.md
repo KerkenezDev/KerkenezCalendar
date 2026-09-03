@@ -1,6 +1,6 @@
-#  Kerkenez Calendar (Win32)
+#  Kerkenez Calendar
 
-> **Lightweight, High-Performance Windows Desktop Calendar in the Philosophy of Kerkenez Mail (Email Summarizer)**  
+> **Lightweight, High-Performance Windows Desktop Calendar made to create a suit with KerkenezMail**  
 > *Target Framework:* **.NET 10** (`net10.0-windows10.0.19041.0`)  
 > *Author:* Ahmet İsmail Eraslan & DeepMind / Antigravity Engineering  
 
@@ -8,7 +8,7 @@
 
 ## 🌟 Overview
 
-**Kerkenez Calendar** is a fast, modern, and lightweight native Windows calendar client built with C# and Windows Forms on .NET 10. Designed to follow the exact visual aesthetics, UI layout, and system architecture of **Kerkenez Mail (Email Summarizer)**, it introduces a clean desktop calendar experience with an independent system tray daemon.
+**Kerkenez Calendar** is a fast, modern, and lightweight native Windows calendar client built with C# and Windows Forms on .NET 10. Designed to create a suit with the github.com/KerkenezDev/KerkenezMail with minimal overhead.
 
 ### 📐 UI Layout Mapping (from Kerkenez Mail)
 * **Mail Body Box $\rightarrow$ Month View Grid**: Interactive 7x6 month calendar grid displaying days, event counts, current date highlights, and category badges.
