@@ -1,0 +1,28 @@
+## Build and SDK outputs
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## IDE / Visual Studio / JetBrains
+.vs/
+.vscode/
+.idea/
+
+## Crash and memory dumps
+*.dmp
+*.dump
+
+## Release and package artifacts
+publish/
+source/
+*.zip
+
+## OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
