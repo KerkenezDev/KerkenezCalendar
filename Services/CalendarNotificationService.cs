@@ -23,73 +23,19 @@ namespace KerkenezCalendar.Services
         [DllImport("shell32.dll", SetLastError = true)]
         private static extern void SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string AppID);
 
-        public static string StartMenuShortcutPath => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Programs),
-            "Kerkenez Calendar.lnk");
+        public static string StartMenuShortcutPath => StartupRegistrationService.StartMenuShortcutPath;
 
         public static string ResolveAppId()
         {
             if (_cachedAppId != null) return _cachedAppId;
-
-            try
-            {
-                if (File.Exists(StartMenuShortcutPath))
-                {
-                    Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
-                    if (shellType != null)
-                    {
-                        dynamic shell = Activator.CreateInstance(shellType)!;
-                        dynamic shortcut = shell.CreateShortcut(StartMenuShortcutPath);
-                        string target = (string)shortcut.TargetPath;
-                        if (!string.IsNullOrWhiteSpace(target) && File.Exists(target))
-                        {
-                            return _cachedAppId = target;
-                        }
-                    }
-                }
-                else
-                {
-                    EnsureStartMenuShortcut();
-                }
-            }
-            catch { }
-
-            string exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
-            {
-                string candidate = Path.Combine(AppContext.BaseDirectory, "KerkenezCalendar.exe");
-                if (File.Exists(candidate)) exePath = candidate;
-            }
-
-            return _cachedAppId = exePath;
+            return _cachedAppId = StartupRegistrationService.GetExecutablePath();
         }
 
         public static void EnsureStartMenuShortcut()
         {
             try
             {
-                string exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-                if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
-                {
-                    string candidate = Path.Combine(AppContext.BaseDirectory, "KerkenezCalendar.exe");
-                    if (File.Exists(candidate)) exePath = candidate;
-                }
-
-                if (!File.Exists(exePath)) return;
-
-                Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) return;
-
-                string dir = Path.GetDirectoryName(StartMenuShortcutPath) ?? "";
-                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-
-                dynamic shell = Activator.CreateInstance(shellType)!;
-                dynamic shortcut = shell.CreateShortcut(StartMenuShortcutPath);
-                shortcut.TargetPath = exePath;
-                shortcut.WorkingDirectory = Path.GetDirectoryName(exePath);
-                shortcut.Description = "Kerkenez Calendar - Lightweight Desktop Calendar";
-                shortcut.IconLocation = exePath + ",0";
-                shortcut.Save();
+                StartupRegistrationService.CreateShortcuts(createDesktop: false, createStartMenu: true);
             }
             catch { }
         }

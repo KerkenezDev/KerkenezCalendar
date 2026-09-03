@@ -14,6 +14,10 @@ namespace KerkenezCalendar.Services
         public const uint WM_TRAYICON = WM_USER + 102;
         public const uint WM_DESTROY = 0x0002;
         public const uint WM_COMMAND = 0x0111;
+        public const uint WM_TIMECHANGE = 0x001E;
+        public const uint WM_POWERBROADCAST = 0x0218;
+        public const uint PBT_APMRESUMEAUTOMATIC = 0x0012;
+        public const uint PBT_APMRESUMESUSPEND = 0x0007;
         public const uint WM_LBUTTONUP = 0x0202;
         public const uint WM_LBUTTONDBLCLK = 0x0203;
         public const uint WM_RBUTTONUP = 0x0205;
@@ -198,6 +202,9 @@ namespace KerkenezCalendar.Services
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetCursorPos(out POINT lpPoint);
 
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        public static extern uint RegisterWindowMessage(string lpString);
+
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool DestroyIcon(IntPtr hIcon);
@@ -226,9 +233,19 @@ namespace KerkenezCalendar.Services
                 GC.WaitForPendingFinalizers();
                 GC.Collect(2, GCCollectionMode.Aggressive, true, true);
 
-                IntPtr hProcess = GetCurrentProcess();
-                EmptyWorkingSet(hProcess);
-                SetProcessWorkingSetSize(hProcess, (IntPtr)(-1), (IntPtr)(-1));
+                IntPtr hProcess = OpenProcess(0x1F0FFF, false, Environment.ProcessId);
+                if (hProcess != IntPtr.Zero)
+                {
+                    try
+                    {
+                        EmptyWorkingSet(hProcess);
+                        SetProcessWorkingSetSize(hProcess, (IntPtr)(-1), (IntPtr)(-1));
+                    }
+                    finally
+                    {
+                        CloseHandle(hProcess);
+                    }
+                }
             }
             catch
             {
@@ -262,6 +279,23 @@ namespace KerkenezCalendar.Services
                 // Process handle may be inaccessible
             }
             return false;
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        public static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+        /// <summary>
+        /// Flushes Windows Shell associations and icon cache so desktop/start menu shortcuts immediately refresh their icons.
+        /// </summary>
+        public static void RefreshShellIcons()
+        {
+            try
+            {
+                const int SHCNE_ASSOCCHANGED = 0x08000000;
+                const uint SHCNF_IDLIST = 0;
+                SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+            }
+            catch { }
         }
     }
 }

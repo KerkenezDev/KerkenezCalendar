@@ -26,7 +26,15 @@ namespace KerkenezCalendar.Models
         }
 
         public bool EnableTrayNotifications { get; set; } = true;
-        public int TrayRefreshIntervalMinutes { get; set; } = 5;
+        public bool EnablePeriodicSync { get; set; } = true;
+        public int SyncIntervalMinutes { get; set; } = 15;
+
+        [JsonIgnore]
+        public int TrayRefreshIntervalMinutes
+        {
+            get => SyncIntervalMinutes;
+            set => SyncIntervalMinutes = value;
+        }
         public bool StartWithWindows { get; set; } = false;
         public bool PlaySoundOnReminder { get; set; } = true;
 

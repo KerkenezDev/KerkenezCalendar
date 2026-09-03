@@ -23,8 +23,18 @@ namespace KerkenezCalendar.Models
         public string Category { get; set; } = "Work";
         public string ColorTag { get; set; } = "#0078D7";
         public string Recurrence { get; set; } = "None";
+        public string? RecurrenceRule { get; set; }
+        public DateTime? RecurrenceEnd { get; set; }
+        public DateTime? NextOccurrence { get; set; }
+        public string? MasterEventId { get; set; }
         public bool IsCompleted { get; set; } = false;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        [JsonIgnore]
+        public bool IsRecurring => !string.IsNullOrEmpty(Recurrence) && !Recurrence.Equals("None", StringComparison.OrdinalIgnoreCase);
+
+        [JsonIgnore]
+        public bool IsVirtualOccurrence => !string.IsNullOrEmpty(MasterEventId);
 
         [JsonIgnore]
         public DateTime? EffectiveReminderTime
@@ -32,8 +42,40 @@ namespace KerkenezCalendar.Models
             get
             {
                 if (ReminderMinutesBefore < 0) return null;
-                return StartDate.AddMinutes(-ReminderMinutesBefore);
+                // If this is a recurring master event with NextOccurrence set, use NextOccurrence
+                DateTime eventStart = (IsRecurring && NextOccurrence.HasValue && !IsVirtualOccurrence)
+                    ? NextOccurrence.Value
+                    : StartDate;
+                return eventStart.AddMinutes(-ReminderMinutesBefore);
             }
+        }
+
+        public CalendarEvent CloneOccurrence(DateTime occurrenceDate)
+        {
+            TimeSpan duration = EndDate - StartDate;
+            DateTime newStart = occurrenceDate.Date.Add(StartDate.TimeOfDay);
+            DateTime newEnd = newStart.Add(duration);
+
+            return new CalendarEvent
+            {
+                Id = $"{Id}_occ_{occurrenceDate:yyyyMMdd}",
+                MasterEventId = this.Id,
+                Title = this.Title,
+                Description = this.Description,
+                Location = this.Location,
+                StartDate = newStart,
+                EndDate = newEnd,
+                IsAllDay = this.IsAllDay,
+                ReminderMinutesBefore = this.ReminderMinutesBefore,
+                AccountId = this.AccountId,
+                Category = this.Category,
+                ColorTag = this.ColorTag,
+                Recurrence = this.Recurrence,
+                RecurrenceRule = this.RecurrenceRule,
+                RecurrenceEnd = this.RecurrenceEnd,
+                IsCompleted = this.IsCompleted,
+                CreatedAt = this.CreatedAt
+            };
         }
 
         public string GetTimeRangeDisplayText(bool use24Hour = false)

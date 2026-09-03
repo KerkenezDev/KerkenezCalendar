@@ -34,9 +34,10 @@ namespace KerkenezCalendar.UI.Tabs
         // System Tray Daemon Controls
         private CheckBox _chkAlwaysKeepOn = null!;
         private CheckBox _chkEnableTrayNotifs = null!;
-        private NumericUpDown _numTrayInterval = null!;
-        private CheckBox _chkStartWithWindows = null!;
         private CheckBox _chkPlaySound = null!;
+        private CheckBox _chkEnablePeriodicSync = null!;
+        private NumericUpDown _numSyncInterval = null!;
+        private CheckBox _chkStartWithWindows = null!;
         private Button _btnRestartDaemon = null!;
 
         // Bottom Actions
@@ -211,6 +212,7 @@ namespace KerkenezCalendar.UI.Tabs
                 bool ok = StartupRegistrationService.CreateShortcuts();
                 if (ok)
                 {
+                    UninstallRegistrationService.RegisterOrUpdate();
                     MessageBox.Show(this, "Shortcuts for Kerkenez Calendar were successfully created on your Desktop and Start Menu!", "Shortcuts Created", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
@@ -317,17 +319,32 @@ namespace KerkenezCalendar.UI.Tabs
                 Font = new Font("Segoe UI", 9F)
             };
 
-            var rowTrayInterval = new FlowLayoutPanel
+            _chkEnablePeriodicSync = new CheckBox
+            {
+                Text = "Automatically sync with accounts on predetermined minutes",
+                AutoSize = true,
+                Checked = true,
+                Margin = new Padding(0, 0, 0, (int)(6 * scale)),
+                Font = new Font("Segoe UI", 9F)
+            };
+
+            var rowSyncInterval = new FlowLayoutPanel
             {
                 AutoSize = true,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 Margin = new Padding(0, 0, 0, (int)(8 * scale))
             };
-            var lblInterval = new Label { Text = "Reminder check interval (minutes):", AutoSize = true, Margin = new Padding(0, 4, 8, 0), Font = new Font("Segoe UI", 9F) };
-            _numTrayInterval = new NumericUpDown { Width = (int)(75 * scale), Minimum = 1, Maximum = 120, Value = 5, Font = new Font("Segoe UI", 9F) };
-            rowTrayInterval.Controls.Add(lblInterval);
-            rowTrayInterval.Controls.Add(_numTrayInterval);
+            var lblSyncInterval = new Label { Text = "Account sync interval (minutes):", AutoSize = true, Margin = new Padding((int)(20 * scale), 4, 8, 0), Font = new Font("Segoe UI", 9F) };
+            _numSyncInterval = new NumericUpDown { Width = (int)(75 * scale), Minimum = 1, Maximum = 1440, Value = 15, Font = new Font("Segoe UI", 9F) };
+            rowSyncInterval.Controls.Add(lblSyncInterval);
+            rowSyncInterval.Controls.Add(_numSyncInterval);
+
+            _chkEnablePeriodicSync.CheckedChanged += (s, e) =>
+            {
+                _numSyncInterval.Enabled = _chkEnablePeriodicSync.Checked;
+                lblSyncInterval.Enabled = _chkEnablePeriodicSync.Checked;
+            };
 
             _chkStartWithWindows = new CheckBox
             {
@@ -364,7 +381,8 @@ namespace KerkenezCalendar.UI.Tabs
             pnlTrayCard.Controls.Add(_chkAlwaysKeepOn);
             pnlTrayCard.Controls.Add(_chkEnableTrayNotifs);
             pnlTrayCard.Controls.Add(_chkPlaySound);
-            pnlTrayCard.Controls.Add(rowTrayInterval);
+            pnlTrayCard.Controls.Add(_chkEnablePeriodicSync);
+            pnlTrayCard.Controls.Add(rowSyncInterval);
             pnlTrayCard.Controls.Add(_chkStartWithWindows);
             pnlTrayCard.Controls.Add(rowDaemonAction);
 
@@ -568,7 +586,9 @@ namespace KerkenezCalendar.UI.Tabs
             _chkAlwaysKeepOn.Checked = s.AlwaysKeepOn;
             _chkEnableTrayNotifs.Checked = s.EnableTrayNotifications;
             _chkPlaySound.Checked = s.PlaySoundOnReminder;
-            _numTrayInterval.Value = Math.Clamp(s.TrayRefreshIntervalMinutes, 1, 120);
+            _chkEnablePeriodicSync.Checked = s.EnablePeriodicSync;
+            _numSyncInterval.Value = Math.Clamp(s.SyncIntervalMinutes, 1, 1440);
+            _numSyncInterval.Enabled = s.EnablePeriodicSync;
             _chkStartWithWindows.Checked = s.StartWithWindows || StartupRegistrationService.IsStartupEnabled();
         }
 
@@ -603,7 +623,8 @@ namespace KerkenezCalendar.UI.Tabs
             s.AlwaysKeepOn = _chkAlwaysKeepOn.Checked;
             s.EnableTrayNotifications = _chkEnableTrayNotifs.Checked;
             s.PlaySoundOnReminder = _chkPlaySound.Checked;
-            s.TrayRefreshIntervalMinutes = (int)_numTrayInterval.Value;
+            s.EnablePeriodicSync = _chkEnablePeriodicSync.Checked;
+            s.SyncIntervalMinutes = (int)_numSyncInterval.Value;
             s.StartWithWindows = _chkStartWithWindows.Checked;
 
             // Sync registry

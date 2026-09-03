@@ -21,6 +21,7 @@ namespace KerkenezCalendar.UI.Controls
         public event Action<CalendarEvent>? EventSelected;
         public event Action<DateTime>? AddEventRequested;
         public event Action<CalendarEvent>? EditEventRequested;
+        public event Action<CalendarEvent>? DeleteEventRequested;
 
         private Panel _headerPanel = null!;
         private Label _lblDateTitle = null!;
@@ -282,6 +283,20 @@ namespace KerkenezCalendar.UI.Controls
             card.Controls.Add(lblTime);
             card.Controls.Add(lblTitle);
             card.Controls.Add(lblInfo);
+
+            var cardMenu = new ContextMenuStrip();
+            var itemHeader = new ToolStripMenuItem($"Event: {ev.Title}") { Enabled = false, Font = new Font("Segoe UI", 9F, FontStyle.Bold) };
+            var itemEdit = new ToolStripMenuItem("✏️ Edit Event", null, (s, e) => EditEventRequested?.Invoke(ev));
+            var itemDelete = new ToolStripMenuItem("🗑️ Delete Event", null, (s, e) => DeleteEventRequested?.Invoke(ev));
+            cardMenu.Items.Add(itemHeader);
+            cardMenu.Items.Add(new ToolStripSeparator());
+            cardMenu.Items.Add(itemEdit);
+            cardMenu.Items.Add(itemDelete);
+
+            card.ContextMenuStrip = cardMenu;
+            lblTime.ContextMenuStrip = cardMenu;
+            lblTitle.ContextMenuStrip = cardMenu;
+            lblInfo.ContextMenuStrip = cardMenu;
 
             void OnCardClicked(object? sender, EventArgs e)
             {

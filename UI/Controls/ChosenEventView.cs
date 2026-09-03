@@ -16,6 +16,8 @@ namespace KerkenezCalendar.UI.Controls
         private CalendarEvent? _currentEvent;
         private DateTime _currentDate = DateTime.Today;
 
+        public CalendarEvent? CurrentEvent => _currentEvent;
+
         public event Action<CalendarEvent>? EditRequested;
         public event Action<CalendarEvent>? DeleteRequested;
 

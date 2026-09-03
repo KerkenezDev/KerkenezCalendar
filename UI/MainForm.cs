@@ -70,6 +70,36 @@ namespace KerkenezCalendar.UI
                     CalendarDaemonHelper.StopDaemon();
                     Log("[*] Background tray daemon is disabled");
                 }
+
+                if (_configService.IsFirstInstallation)
+                {
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            var res = MessageBox.Show(
+                                this,
+                                "Welcome to Kerkenez Calendar!\r\n\r\nWould you like to create shortcuts on your Desktop and Start Menu for easy access?",
+                                "Kerkenez Calendar Shortcuts",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Question);
+
+                            if (res == DialogResult.Yes)
+                            {
+                                bool ok = StartupRegistrationService.CreateShortcuts();
+                                if (ok)
+                                {
+                                    UninstallRegistrationService.RegisterOrUpdate();
+                                    Log("[✓] Shortcuts created on Desktop and Start Menu");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[!] Shortcut prompt error: {ex.Message}");
+                        }
+                    }));
+                }
             };
         }
 
@@ -282,19 +312,21 @@ namespace KerkenezCalendar.UI
             // When user clicks Edit button in chosen event view
             _chosenEventView.EditRequested += ev => OpenEditEventDialog(ev);
 
-            // When user clicks Delete button in chosen event view
-            _chosenEventView.DeleteRequested += ev =>
-            {
-                var res = MessageBox.Show(this, $"Are you sure you want to delete '{ev.Title}'?", "Confirm Delete", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                if (res == DialogResult.Yes)
-                {
-                    _eventService.DeleteEvent(ev.Id);
-                    _chosenEventView.SetEvent(null);
-                    _dayEventsView.ReloadEvents();
-                    _monthView.RefreshCalendarGrid();
-                    UpdateStatusMetrics();
-                }
-            };
+            // Month view sync and context actions
+            _monthView.SyncAccountsRequested += OnSyncAccountsRequested;
+            _monthView.EditEventRequested += ev => OpenEditEventDialog(ev);
+            _monthView.DeleteEventRequested += ev => ConfirmAndDeleteEvent(ev);
+
+            // Day events view delete
+            _dayEventsView.DeleteEventRequested += ev => ConfirmAndDeleteEvent(ev);
+
+            // Chosen event view delete
+            _chosenEventView.DeleteRequested += ev => ConfirmAndDeleteEvent(ev);
+
+            // Agenda view actions
+            _agendaView.EditRequested += ev => OpenEditEventDialog(ev);
+            _agendaView.DeleteRequested += ev => ConfirmAndDeleteEvent(ev);
+            _agendaView.AddEventRequested += () => OpenCreateEventDialog(DateTime.Today);
 
             // Event service updates
             _eventService.EventsChanged += () =>
@@ -316,6 +348,55 @@ namespace KerkenezCalendar.UI
             };
         }
 
+        private void OnSyncAccountsRequested()
+        {
+            try
+            {
+                _configService.LoadConfig();
+                _eventService.LoadEvents();
+
+                var accounts = _configService.GetAccounts();
+                int activeAccounts = accounts.Count(a => a.IsEnabled);
+                int totalEvents = _eventService.GetAllEvents().Count;
+
+                _monthView.RefreshCalendarGrid();
+                _dayEventsView.ReloadEvents();
+                _chosenEventView.RefreshDisplay();
+                _agendaView.ReloadAgenda();
+                UpdateStatusMetrics();
+
+                CalendarEventService.SignalDataChanged();
+
+                _lblStatus.Text = $"Synced with accounts • {activeAccounts} active accounts • {totalEvents} events loaded";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Failed to sync accounts: {ex.Message}", "Sync Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ConfirmAndDeleteEvent(CalendarEvent ev)
+        {
+            string targetId = (!string.IsNullOrEmpty(ev.MasterEventId)) ? ev.MasterEventId : ev.Id;
+            string prompt = (ev.IsVirtualOccurrence || ev.IsRecurring)
+                ? $"'{ev.Title}' is a recurring event. Are you sure you want to delete this event series?"
+                : $"Are you sure you want to delete '{ev.Title}'?";
+
+            var res = MessageBox.Show(this, prompt, "Confirm Delete", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (res == DialogResult.Yes)
+            {
+                _eventService.DeleteEvent(targetId);
+                if (_chosenEventView.CurrentEvent?.Id == ev.Id || _chosenEventView.CurrentEvent?.Id == targetId)
+                {
+                    _chosenEventView.SetEvent(null);
+                }
+                _dayEventsView.ReloadEvents();
+                _monthView.RefreshCalendarGrid();
+                _agendaView.ReloadAgenda();
+                UpdateStatusMetrics();
+            }
+        }
+
         private void OnEventSelectedFromExternal(CalendarEvent ev)
         {
             _sidebar.SelectedIndex = 0; // Switch to Calendar tab
@@ -333,19 +414,45 @@ namespace KerkenezCalendar.UI
                 _monthView.RefreshCalendarGrid();
                 _dayEventsView.ReloadEvents();
                 _chosenEventView.SetEvent(dlg.ResultEvent);
+                _agendaView.ReloadAgenda();
                 UpdateStatusMetrics();
             }
         }
 
         private void OpenEditEventDialog(CalendarEvent ev)
         {
-            using var dlg = new EventEditDialog(_configService, ev);
-            if (dlg.ShowDialog(this) == DialogResult.OK)
+            CalendarEvent targetEvent = ev;
+            if (ev.IsVirtualOccurrence && !string.IsNullOrEmpty(ev.MasterEventId))
+            {
+                var master = _eventService.GetAllEvents().FirstOrDefault(e => e.Id == ev.MasterEventId);
+                if (master != null)
+                {
+                    targetEvent = master;
+                }
+            }
+
+            using var dlg = new EventEditDialog(_configService, targetEvent);
+            var res = dlg.ShowDialog(this);
+            if (res == DialogResult.OK)
             {
                 _eventService.UpdateEvent(dlg.ResultEvent);
                 _monthView.RefreshCalendarGrid();
                 _dayEventsView.ReloadEvents();
                 _chosenEventView.SetEvent(dlg.ResultEvent);
+                _agendaView.ReloadAgenda();
+                UpdateStatusMetrics();
+            }
+            else if (res == DialogResult.Abort)
+            {
+                string targetId = (!string.IsNullOrEmpty(targetEvent.MasterEventId)) ? targetEvent.MasterEventId : targetEvent.Id;
+                _eventService.DeleteEvent(targetId);
+                if (_chosenEventView.CurrentEvent?.Id == ev.Id || _chosenEventView.CurrentEvent?.Id == targetId)
+                {
+                    _chosenEventView.SetEvent(null);
+                }
+                _dayEventsView.ReloadEvents();
+                _monthView.RefreshCalendarGrid();
+                _agendaView.ReloadAgenda();
                 UpdateStatusMetrics();
             }
         }

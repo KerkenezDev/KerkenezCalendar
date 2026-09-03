@@ -16,7 +16,36 @@ namespace KerkenezCalendar
         [STAThread]
         static void Main(string[] args)
         {
-            // 1. Handle --daemon or --tray switch (Background System Tray Daemon)
+            // 1. Lightweight auto-healing of existing registry keys and shortcuts if executable moved
+            AutoHealService.AutoHeal();
+
+            // 2. Handle --uninstall switch
+            if (args != null && args.Any(a =>
+                a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase) ||
+                a.Equals("/uninstall", StringComparison.OrdinalIgnoreCase) ||
+                a.Equals("-uninstall", StringComparison.OrdinalIgnoreCase)))
+            {
+                bool isQuiet = args.Any(a =>
+                    a.Equals("--quiet", StringComparison.OrdinalIgnoreCase) ||
+                    a.Equals("/quiet", StringComparison.OrdinalIgnoreCase) ||
+                    a.Equals("-quiet", StringComparison.OrdinalIgnoreCase) ||
+                    a.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
+                    a.Equals("/silent", StringComparison.OrdinalIgnoreCase) ||
+                    a.Equals("-silent", StringComparison.OrdinalIgnoreCase) ||
+                    a.Equals("-s", StringComparison.OrdinalIgnoreCase) ||
+                    a.Equals("-q", StringComparison.OrdinalIgnoreCase));
+
+                if (!isQuiet)
+                {
+                    ApplicationConfiguration.Initialize();
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                }
+                HandleUninstall(isQuiet);
+                return;
+            }
+
+            // 3. Handle --daemon or --tray switch (Background System Tray Daemon)
             bool isDaemonMode = args != null && args.Any(a =>
                 a.Equals("--daemon", StringComparison.OrdinalIgnoreCase) ||
                 a.Equals("/daemon", StringComparison.OrdinalIgnoreCase) ||
@@ -31,7 +60,7 @@ namespace KerkenezCalendar
                 return;
             }
 
-            // 2. Normal Execution (Main GUI Application)
+            // 3. Normal Execution (Main GUI Application)
             RunMainUiMode(args);
         }
 
@@ -102,6 +131,83 @@ namespace KerkenezCalendar
                 }
             }
             catch { }
+        }
+
+        private static void HandleUninstall(bool isQuiet)
+        {
+            if (isQuiet)
+            {
+                try
+                {
+                    PerformUninstall();
+                }
+                catch { }
+                return;
+            }
+
+            var res = MessageBox.Show(
+                "Are you sure you want to uninstall Kerkenez Calendar?\n\nThis will stop background daemons, remove Desktop and Start Menu shortcuts, delete Windows startup entries, remove Installed Apps registration, and delete calendar configuration and events from %APPDATA%\\Kerkenez\\calendar.",
+                "Uninstall Kerkenez Calendar",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (res == DialogResult.Yes)
+            {
+                bool success = PerformUninstall();
+                if (success)
+                {
+                    MessageBox.Show(
+                        "Kerkenez Calendar shortcuts, startup entries, Windows Installed Apps registration, and calendar data have been successfully removed.",
+                        "Uninstall Complete",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show(
+                        "Failed to completely remove all configuration files or shortcuts.",
+                        "Uninstall Warning",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+            }
+        }
+
+        private static bool PerformUninstall()
+        {
+            try
+            {
+                // 1. Stop background tray daemon if running
+                CalendarDaemonHelper.StopDaemon();
+
+                // 2. Remove Windows startup run key
+                StartupRegistrationService.SetStartupEnabled(false);
+
+                // 3. Remove Windows Installed Apps registry entry
+                UninstallRegistrationService.Unregister();
+
+                // 4. Remove Desktop and Start Menu shortcuts
+                StartupRegistrationService.DeleteShortcuts();
+
+                // 5. Remove calendar folder (%APPDATA%\Kerkenez\calendar)
+                if (System.IO.Directory.Exists(CalendarConfigService.CalendarFolder))
+                {
+                    System.IO.Directory.Delete(CalendarConfigService.CalendarFolder, true);
+                }
+
+                // 6. Clean legacy Kerkezer folder if present
+                if (System.IO.Directory.Exists(CalendarConfigService.LegacyKerkezerFolder))
+                {
+                    System.IO.Directory.Delete(CalendarConfigService.LegacyKerkezerFolder, true);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Program] Error during uninstall: {ex.Message}");
+                return false;
+            }
         }
     }
 }

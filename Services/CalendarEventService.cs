@@ -10,6 +10,21 @@ namespace KerkenezCalendar.Services
 {
     public class CalendarEventService
     {
+        public const string DataChangedEventName = @"Global\KerkenezCalendar_DataChangedEvent";
+
+        public static void SignalDataChanged()
+        {
+            try
+            {
+                if (System.Threading.EventWaitHandle.TryOpenExisting(DataChangedEventName, out var ev))
+                {
+                    ev.Set();
+                    ev.Dispose();
+                }
+            }
+            catch { }
+        }
+
         private readonly CalendarConfigService _configService;
         private readonly List<CalendarEvent> _events = new List<CalendarEvent>();
         private readonly object _lock = new object();
@@ -133,6 +148,7 @@ namespace KerkenezCalendar.Services
             }
             if (result)
             {
+                SignalDataChanged();
                 EventsChanged?.Invoke();
             }
             return result;
@@ -155,35 +171,78 @@ namespace KerkenezCalendar.Services
         public List<CalendarEvent> GetEventsForDate(DateTime date)
         {
             DateTime targetDate = date.Date;
+            var results = new List<CalendarEvent>();
+
             lock (_lock)
             {
-                return _events
-                    .Where(e => e.StartDate.Date == targetDate || (e.StartDate.Date <= targetDate && e.EndDate.Date >= targetDate))
-                    .OrderBy(e => !e.IsAllDay) // All day first
-                    .ThenBy(e => e.StartDate)
-                    .ToList();
+                foreach (var ev in _events)
+                {
+                    if (!ev.IsRecurring)
+                    {
+                        if (ev.StartDate.Date == targetDate || (ev.StartDate.Date <= targetDate && ev.EndDate.Date >= targetDate))
+                        {
+                            results.Add(ev);
+                        }
+                    }
+                    else
+                    {
+                        if (RecurrenceHelper.IsOccurringOnDate(ev, targetDate))
+                        {
+                            results.Add(ev.CloneOccurrence(targetDate));
+                        }
+                    }
+                }
             }
+
+            return results
+                .OrderBy(e => !e.IsAllDay) // All day first
+                .ThenBy(e => e.StartDate)
+                .ToList();
         }
 
         public List<CalendarEvent> GetEventsForMonth(int year, int month)
         {
             DateTime firstDay = new DateTime(year, month, 1);
             DateTime lastDay = firstDay.AddMonths(1).AddDays(-1);
+            var results = new List<CalendarEvent>();
 
             lock (_lock)
             {
-                return _events
-                    .Where(e => (e.StartDate.Date >= firstDay && e.StartDate.Date <= lastDay) ||
-                                (e.EndDate.Date >= firstDay && e.EndDate.Date <= lastDay) ||
-                                (e.StartDate.Date <= firstDay && e.EndDate.Date >= lastDay))
-                    .OrderBy(e => e.StartDate)
-                    .ToList();
+                foreach (var ev in _events)
+                {
+                    if (!ev.IsRecurring)
+                    {
+                        if ((ev.StartDate.Date >= firstDay && ev.StartDate.Date <= lastDay) ||
+                            (ev.EndDate.Date >= firstDay && ev.EndDate.Date <= lastDay) ||
+                            (ev.StartDate.Date <= firstDay && ev.EndDate.Date >= lastDay))
+                        {
+                            results.Add(ev);
+                        }
+                    }
+                    else
+                    {
+                        var occurrences = RecurrenceHelper.GetOccurrencesInRange(ev, firstDay, lastDay);
+                        foreach (var occDate in occurrences)
+                        {
+                            results.Add(ev.CloneOccurrence(occDate));
+                        }
+                    }
+                }
             }
+
+            return results
+                .OrderBy(e => e.StartDate)
+                .ToList();
         }
 
         public void AddEvent(CalendarEvent ev)
         {
             if (ev == null) return;
+            if (ev.IsRecurring)
+            {
+                RecurrenceHelper.UpdateNextOccurrence(ev, DateTime.Now);
+            }
+
             lock (_lock)
             {
                 _events.Add(ev);
@@ -195,6 +254,11 @@ namespace KerkenezCalendar.Services
         public void UpdateEvent(CalendarEvent ev)
         {
             if (ev == null) return;
+            if (ev.IsRecurring)
+            {
+                RecurrenceHelper.UpdateNextOccurrence(ev, DateTime.Now);
+            }
+
             lock (_lock)
             {
                 int index = _events.FindIndex(e => e.Id == ev.Id);
@@ -212,7 +276,7 @@ namespace KerkenezCalendar.Services
             bool removed = false;
             lock (_lock)
             {
-                int count = _events.RemoveAll(e => e.Id == id);
+                int count = _events.RemoveAll(e => e.Id == id || (!string.IsNullOrEmpty(e.MasterEventId) && e.MasterEventId == id));
                 if (count > 0)
                 {
                     removed = true;
@@ -230,10 +294,66 @@ namespace KerkenezCalendar.Services
         {
             lock (_lock)
             {
-                return _events
-                    .Where(e => e.EffectiveReminderTime.HasValue && e.EffectiveReminderTime.Value > referenceTime && !e.IsCompleted)
-                    .OrderBy(e => e.EffectiveReminderTime!.Value)
-                    .FirstOrDefault();
+                CalendarEvent? earliest = null;
+                DateTime? earliestReminderTime = null;
+
+                foreach (var ev in _events)
+                {
+                    if (ev.IsCompleted) continue;
+
+                    DateTime? reminderTime = null;
+                    CalendarEvent candidate = ev;
+
+                    if (!ev.IsRecurring)
+                    {
+                        reminderTime = ev.EffectiveReminderTime;
+                    }
+                    else
+                    {
+                        DateTime? nextOcc = RecurrenceHelper.GetNextOccurrence(ev, referenceTime);
+                        if (nextOcc.HasValue && ev.ReminderMinutesBefore >= 0)
+                        {
+                            reminderTime = nextOcc.Value.AddMinutes(-ev.ReminderMinutesBefore);
+                            candidate = ev.CloneOccurrence(nextOcc.Value.Date);
+                        }
+                    }
+
+                    if (reminderTime.HasValue && reminderTime.Value > referenceTime)
+                    {
+                        if (!earliestReminderTime.HasValue || reminderTime.Value < earliestReminderTime.Value)
+                        {
+                            earliestReminderTime = reminderTime.Value;
+                            earliest = candidate;
+                        }
+                    }
+                }
+
+                return earliest;
+            }
+        }
+
+        public void AdvanceRecurringEvents(DateTime now)
+        {
+            bool modified = false;
+            lock (_lock)
+            {
+                foreach (var ev in _events)
+                {
+                    if (ev.IsRecurring && (!ev.NextOccurrence.HasValue || ev.NextOccurrence.Value <= now))
+                    {
+                        var next = RecurrenceHelper.GetNextOccurrence(ev, now);
+                        if (ev.NextOccurrence != next)
+                        {
+                            ev.NextOccurrence = next;
+                            modified = true;
+                        }
+                    }
+                }
+
+                if (modified)
+                {
+                    SaveEventsInternal();
+                }
             }
         }
 
@@ -263,6 +383,11 @@ namespace KerkenezCalendar.Services
                     {
                         sb.AppendLine($"DTSTART:{ev.StartDate:yyyyMMdd\\THHmmss}");
                         sb.AppendLine($"DTEND:{ev.EndDate:yyyyMMdd\\THHmmss}");
+                    }
+
+                    if (ev.IsRecurring && !string.IsNullOrWhiteSpace(ev.RecurrenceRule))
+                    {
+                        sb.AppendLine($"RRULE:{ev.RecurrenceRule}");
                     }
 
                     sb.AppendLine($"SUMMARY:{EscapeIcs(ev.Title)}");

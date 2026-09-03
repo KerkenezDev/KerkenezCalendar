@@ -30,10 +30,12 @@ namespace KerkenezCalendar.Services
         };
 
         public CalendarSettings Settings { get; private set; }
+        public bool IsFirstInstallation { get; private set; }
         public event Action? SettingsChanged;
 
         public CalendarConfigService()
         {
+            IsFirstInstallation = !File.Exists(ConfigFilePath);
             EnsureDirectoriesAndMigrations();
             Settings = LoadConfig();
         }
@@ -165,6 +167,7 @@ namespace KerkenezCalendar.Services
                 // Sync Windows logon run key
                 StartupRegistrationService.SetStartupEnabled(Settings.StartWithWindows);
 
+                CalendarEventService.SignalDataChanged();
                 SettingsChanged?.Invoke();
                 return true;
             }

@@ -23,12 +23,16 @@ namespace KerkenezCalendar.Services
         private readonly CalendarConfigService _configService;
         private readonly CalendarEventService _eventService;
         private readonly CalendarDaemonService _daemonService;
-        private System.Threading.Timer? _idleTrimTimer;
+        private System.Threading.Timer? _startupTrimTimer;
+        private System.Threading.Timer? _maintenanceTrimTimer;
         private EventWaitHandle? _exitEvent;
-        private RegisteredWaitHandle? _registeredWait;
+        private RegisteredWaitHandle? _registeredExitWait;
+        private EventWaitHandle? _dataChangedEvent;
+        private RegisteredWaitHandle? _registeredDataChangedWait;
         private IntPtr _hWnd = IntPtr.Zero;
         private NativeMethods.WndProcDelegate? _wndProcDelegate;
         private NativeMethods.NOTIFYICONDATA _nid;
+        private uint _taskbarCreatedMsg;
         private bool _isDisposed;
 
         public NativeCalendarTrayDaemon()
@@ -46,20 +50,23 @@ namespace KerkenezCalendar.Services
 
         public void Start()
         {
+            _taskbarCreatedMsg = NativeMethods.RegisterWindowMessage("TaskbarCreated");
             InitializeMessageWindow();
             CalendarNotificationService.EnsureRegistered();
             InitializeTrayIcon();
             InitializeExitEventHandler();
+            InitializeDataChangedEventHandler();
 
             _daemonService.ReminderTriggered += OnReminderTriggered;
             _daemonService.StatusUpdated += OnStatusUpdated;
+            _daemonService.AccountsSynced += OnAccountsSynced;
             _daemonService.Start();
 
-            // Periodic aggressive memory trimming to guarantee sub-megabyte active footprint
-            _idleTrimTimer = new System.Threading.Timer(_ => NativeMethods.TrimWorkingSet(), null, 2000, 15000);
+            // Initial memory trim once runtime threads and JIT settle (2.5 seconds after start)
+            _startupTrimTimer = new System.Threading.Timer(_ => NativeMethods.TrimWorkingSet(), null, 2500, Timeout.Infinite);
 
-            // Immediate initial trim
-            NativeMethods.TrimWorkingSet();
+            // Periodic gentle maintenance trim every 60 seconds to keep working set clamped at sub-megabyte levels
+            _maintenanceTrimTimer = new System.Threading.Timer(_ => NativeMethods.TrimWorkingSet(), null, 5000, 60000);
 
             // Native Win32 Message Loop (Zero WinForms control overhead)
             while (NativeMethods.GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
@@ -74,13 +81,38 @@ namespace KerkenezCalendar.Services
             try
             {
                 _exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName);
-                _registeredWait = ThreadPool.RegisterWaitForSingleObject(
+                _exitEvent.Reset(); // Clear any stale exit signal from previous daemon run
+
+                _registeredExitWait = ThreadPool.RegisterWaitForSingleObject(
                     _exitEvent,
                     (state, timedOut) =>
                     {
                         if (!timedOut && _hWnd != IntPtr.Zero)
                         {
                             NativeMethods.PostMessage(_hWnd, NativeMethods.WM_DESTROY, IntPtr.Zero, IntPtr.Zero);
+                        }
+                    },
+                    null,
+                    -1,
+                    false);
+            }
+            catch { }
+        }
+
+        private void InitializeDataChangedEventHandler()
+        {
+            try
+            {
+                _dataChangedEvent = new EventWaitHandle(false, EventResetMode.AutoReset, CalendarEventService.DataChangedEventName);
+                _dataChangedEvent.Reset(); // Clear any stale signal
+
+                _registeredDataChangedWait = ThreadPool.RegisterWaitForSingleObject(
+                    _dataChangedEvent,
+                    (state, timedOut) =>
+                    {
+                        if (!timedOut)
+                        {
+                            _daemonService.ReloadFromDisk(initialLoad: false);
                         }
                     },
                     null,
@@ -151,6 +183,28 @@ namespace KerkenezCalendar.Services
                     return IntPtr.Zero;
                 }
             }
+            else if (msg == _taskbarCreatedMsg && _taskbarCreatedMsg != 0)
+            {
+                // Windows Explorer restarted or crashed: restore the tray icon
+                InitializeTrayIcon();
+                return IntPtr.Zero;
+            }
+            else if (msg == NativeMethods.WM_TIMECHANGE)
+            {
+                // User changed system clock, DST shifted, or time zone updated
+                _daemonService.OnSystemTimeChanged();
+                return IntPtr.Zero;
+            }
+            else if (msg == NativeMethods.WM_POWERBROADCAST)
+            {
+                long powerEvent = wParam.ToInt64();
+                if (powerEvent == NativeMethods.PBT_APMRESUMEAUTOMATIC || powerEvent == NativeMethods.PBT_APMRESUMESUSPEND)
+                {
+                    // Resumed from sleep/hibernation: check missed reminders immediately
+                    _daemonService.OnPowerResumed();
+                }
+                return IntPtr.Zero;
+            }
             else if (msg == NativeMethods.WM_DESTROY)
             {
                 NativeMethods.PostQuitMessage(0);
@@ -203,6 +257,7 @@ namespace KerkenezCalendar.Services
             finally
             {
                 NativeMethods.DestroyMenu(hMenu);
+                NativeMethods.TrimWorkingSet();
             }
         }
 
@@ -241,29 +296,39 @@ namespace KerkenezCalendar.Services
         {
             try
             {
-                _configService.LoadConfig();
-                _eventService.LoadEvents();
-
-                _ = _daemonService.CheckRemindersAsync();
-
-                var accounts = _configService.GetAccounts();
-                int activeAccounts = accounts.Count(a => a.IsEnabled);
-                int totalEvents = _eventService.GetAllEvents().Count;
-
-                string syncTitle = "Kerkenez Calendar";
-                string syncMsg = $"Accounts and calendar synced.\n{activeAccounts} active accounts • {totalEvents} events loaded.";
-                CalendarNotificationService.ShowPersistentNotification(
-                    title: syncTitle,
-                    message: syncMsg,
-                    isReminder: false,
-                    onClick: () => LaunchOrFocusMainApp(),
-                    fallbackAction: () => ShowTrayBalloon(syncTitle, syncMsg)
-                );
+                _daemonService.PerformAccountSync(silent: false);
             }
             catch (Exception ex)
             {
                 ShowTrayBalloon("Kerkenez Calendar", $"Sync error: {ex.Message}");
             }
+        }
+
+        private void OnAccountsSynced(int activeAccounts, int totalEvents, bool silent)
+        {
+            try
+            {
+                string syncTitle = "Kerkenez Calendar";
+                string syncMsg = $"Accounts and calendar synced.\n{activeAccounts} active accounts • {totalEvents} events loaded.";
+
+                if (!silent)
+                {
+                    CalendarNotificationService.ShowPersistentNotification(
+                        title: syncTitle,
+                        message: syncMsg,
+                        isReminder: false,
+                        onClick: () => LaunchOrFocusMainApp(),
+                        fallbackAction: () => ShowTrayBalloon(syncTitle, syncMsg)
+                    );
+                }
+                else
+                {
+                    _nid.szTip = Truncate($"Kerkenez Calendar • Synced ({activeAccounts} accts)", 127);
+                    _nid.uFlags = NativeMethods.NIF_TIP;
+                    NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_MODIFY, ref _nid);
+                }
+            }
+            catch { }
         }
 
         private void ShowTrayBalloon(string title, string message)
@@ -298,7 +363,6 @@ namespace KerkenezCalendar.Services
                     fallbackAction: () => ShowTrayBalloon(title, message)
                 );
 
-                // Re-trim working set right after firing notification
                 NativeMethods.TrimWorkingSet();
             }
             catch
@@ -375,9 +439,12 @@ namespace KerkenezCalendar.Services
             if (_isDisposed) return;
             _isDisposed = true;
 
-            _idleTrimTimer?.Dispose();
-            _registeredWait?.Unregister(null);
+            _startupTrimTimer?.Dispose();
+            _maintenanceTrimTimer?.Dispose();
+            _registeredExitWait?.Unregister(null);
             _exitEvent?.Dispose();
+            _registeredDataChangedWait?.Unregister(null);
+            _dataChangedEvent?.Dispose();
             _daemonService.Dispose();
 
             if (_hWnd != IntPtr.Zero)

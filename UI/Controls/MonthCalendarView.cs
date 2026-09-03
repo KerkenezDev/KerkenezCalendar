@@ -20,12 +20,16 @@ namespace KerkenezCalendar.UI.Controls
 
         public event Action<DateTime>? DateSelected;
         public event Action<DateTime>? CreateEventRequested;
+        public event Action? SyncAccountsRequested;
+        public event Action<CalendarEvent>? EditEventRequested;
+        public event Action<CalendarEvent>? DeleteEventRequested;
 
         private Panel _topBar = null!;
         private Label _lblMonthYear = null!;
+        private Button _btnSync = null!;
+        private Button _btnToday = null!;
         private Button _btnPrev = null!;
         private Button _btnNext = null!;
-        private Button _btnToday = null!;
         private Panel _gridPanel = null!;
 
         private readonly List<DayCellInfo> _dayCells = new List<DayCellInfo>();
@@ -104,6 +108,40 @@ namespace KerkenezCalendar.UI.Controls
                 Margin = new Padding(0)
             };
 
+            string refreshGlyph = "\uE72C";
+            Font refreshFont;
+            try
+            {
+                if (FontFamily.Families.Any(f => f.Name.Equals("Segoe MDL2 Assets", StringComparison.OrdinalIgnoreCase)))
+                {
+                    refreshFont = new Font("Segoe MDL2 Assets", 9.5F, FontStyle.Regular);
+                }
+                else
+                {
+                    refreshGlyph = "⟳";
+                    refreshFont = new Font("Segoe UI", 11F, FontStyle.Bold);
+                }
+            }
+            catch
+            {
+                refreshGlyph = "⟳";
+                refreshFont = new Font("Segoe UI", 11F, FontStyle.Bold);
+            }
+
+            _btnSync = new Button
+            {
+                Text = refreshGlyph,
+                Font = refreshFont,
+                Width = (int)(32 * scale),
+                Height = (int)(30 * scale),
+                Margin = new Padding(0, 0, (int)(6 * scale), 0),
+                FlatStyle = FlatStyle.System,
+                Cursor = Cursors.Hand
+            };
+            var toolTip = new ToolTip();
+            toolTip.SetToolTip(_btnSync, "Sync with accounts");
+            _btnSync.Click += (s, e) => SyncAccountsRequested?.Invoke();
+
             _btnToday = new Button
             {
                 Text = "Today",
@@ -153,6 +191,7 @@ namespace KerkenezCalendar.UI.Controls
                 RefreshCalendarGrid();
             };
 
+            navFlow.Controls.Add(_btnSync);
             navFlow.Controls.Add(_btnToday);
             navFlow.Controls.Add(_btnPrev);
             navFlow.Controls.Add(_btnNext);
@@ -496,15 +535,65 @@ namespace KerkenezCalendar.UI.Controls
         {
             for (int i = 0; i < _dayCells.Count; i++)
             {
-                if (_dayCells[i].Bounds.Contains(e.Location))
+                var cell = _dayCells[i];
+                if (cell.Bounds.Contains(e.Location))
                 {
-                    _selectedDate = _dayCells[i].Date;
+                    _selectedDate = cell.Date;
                     for (int j = 0; j < _dayCells.Count; j++)
                     {
                         _dayCells[j].IsSelected = (_dayCells[j].Date.Date == _selectedDate.Date);
                     }
                     _gridPanel.Invalidate();
                     DateSelected?.Invoke(_selectedDate);
+
+                    if (e.Button == MouseButtons.Right)
+                    {
+                        float scale = this.DeviceDpi / 96f;
+                        int headerAreaH = (int)(26 * scale);
+                        int eventH = (int)(18 * scale);
+                        int eventY = cell.Bounds.Top + headerAreaH;
+                        int maxEvents = Math.Max(1, (cell.Bounds.Height - headerAreaH - (int)(4 * scale)) / eventH);
+                        int visibleCount = Math.Min(cell.Events.Count, maxEvents);
+
+                        CalendarEvent? clickedEvent = null;
+                        for (int evIdx = 0; evIdx < visibleCount; evIdx++)
+                        {
+                            var evRect = new Rectangle(cell.Bounds.Left + 3, eventY + 1, cell.Bounds.Width - 6, eventH - 2);
+                            if (evRect.Contains(e.Location))
+                            {
+                                clickedEvent = cell.Events[evIdx];
+                                break;
+                            }
+                            eventY += eventH;
+                        }
+
+                        var menu = new ContextMenuStrip();
+                        if (clickedEvent != null)
+                        {
+                            var itemTitle = new ToolStripMenuItem($"Event: {clickedEvent.Title}") { Enabled = false, Font = new Font("Segoe UI", 9F, FontStyle.Bold) };
+                            var itemEdit = new ToolStripMenuItem("✏️ Edit Event", null, (s, args) => EditEventRequested?.Invoke(clickedEvent));
+                            var itemDelete = new ToolStripMenuItem("🗑️ Delete Event", null, (s, args) => DeleteEventRequested?.Invoke(clickedEvent));
+                            menu.Items.Add(itemTitle);
+                            menu.Items.Add(new ToolStripSeparator());
+                            menu.Items.Add(itemEdit);
+                            menu.Items.Add(itemDelete);
+                        }
+                        else
+                        {
+                            var itemAdd = new ToolStripMenuItem($"➕ Add Event on {cell.Date:MMM d}...", null, (s, args) => CreateEventRequested?.Invoke(cell.Date));
+                            var itemToday = new ToolStripMenuItem("📅 Go to Today", null, (s, args) =>
+                            {
+                                _currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+                                _selectedDate = DateTime.Today;
+                                RefreshCalendarGrid();
+                                DateSelected?.Invoke(_selectedDate);
+                            });
+                            menu.Items.Add(itemAdd);
+                            menu.Items.Add(itemToday);
+                        }
+                        menu.Show(_gridPanel, e.Location);
+                    }
+
                     return;
                 }
             }
