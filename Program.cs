@@ -195,12 +195,6 @@ namespace KerkenezCalendar
                     System.IO.Directory.Delete(CalendarConfigService.CalendarFolder, true);
                 }
 
-                // 6. Clean legacy Kerkezer folder if present
-                if (System.IO.Directory.Exists(CalendarConfigService.LegacyKerkezerFolder))
-                {
-                    System.IO.Directory.Delete(CalendarConfigService.LegacyKerkezerFolder, true);
-                }
-
                 return true;
             }
             catch (Exception ex)

@@ -17,7 +17,6 @@ namespace KerkenezCalendar.Services
 
         // Calendar configuration & data folder
         public static readonly string CalendarFolder = Path.Combine(KerkenezRootFolder, "calendar");
-        public static readonly string LegacyKerkezerFolder = Path.Combine(AppDataFolder, "Kerkezer", "calendar");
 
         public static readonly string ConfigFilePath = Path.Combine(CalendarFolder, "config.json");
         public static readonly string EventsFilePath = Path.Combine(CalendarFolder, "events.dat");
@@ -53,21 +52,6 @@ namespace KerkenezCalendar.Services
                 {
                     Directory.CreateDirectory(CalendarFolder);
                 }
-
-                // If legacy / alternate Kerkezer folder was referenced, ensure directory exists
-                try
-                {
-                    string kerkezerRoot = Path.Combine(AppDataFolder, "Kerkezer");
-                    if (!Directory.Exists(kerkezerRoot))
-                    {
-                        Directory.CreateDirectory(kerkezerRoot);
-                    }
-                    if (!Directory.Exists(LegacyKerkezerFolder))
-                    {
-                        Directory.CreateDirectory(LegacyKerkezerFolder);
-                    }
-                }
-                catch { }
 
                 // Auto-migrate accounts.dat from EmailSummarizer if not present in %APPDATA%\Kerkenez\accounts.dat
                 if (!File.Exists(AccountsFilePath))
@@ -119,12 +103,9 @@ namespace KerkenezCalendar.Services
             {
                 EnsureDirectoriesAndMigrations();
 
-                // Check primary location first, fallback to alternate if exists
-                string targetPath = File.Exists(ConfigFilePath) ? ConfigFilePath : Path.Combine(LegacyKerkezerFolder, "config.json");
-
-                if (File.Exists(targetPath))
+                if (File.Exists(ConfigFilePath))
                 {
-                    string json = File.ReadAllText(targetPath);
+                    string json = File.ReadAllText(ConfigFilePath);
                     var loaded = JsonSerializer.Deserialize<CalendarSettings>(json, JsonOptions);
                     if (loaded != null)
                     {
@@ -155,14 +136,6 @@ namespace KerkenezCalendar.Services
 
                 string json = JsonSerializer.Serialize(Settings, JsonOptions);
                 File.WriteAllText(ConfigFilePath, json);
-
-                // Mirror to alternate folder if present
-                try
-                {
-                    string altConfig = Path.Combine(LegacyKerkezerFolder, "config.json");
-                    File.WriteAllText(altConfig, json);
-                }
-                catch { }
 
                 // Sync Windows logon run key
                 StartupRegistrationService.SetStartupEnabled(Settings.StartWithWindows);
